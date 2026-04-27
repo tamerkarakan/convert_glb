@@ -26,6 +26,7 @@ class GLBMeshConverter:
                     "STRING",
                     {
                         "default": "",
+                        "forceInput": True,
                         "multiline": False,
                         "tooltip": "Absolute or ComfyUI-relative path to a .glb or .gltf file.",
                     },

@@ -28,7 +28,7 @@ mesh/conversion -> GLB Mesh Converter
 
 Inputs:
 
-- `glb_path`: path to a `.glb` or `.gltf` file
+- `glb_path`: connectable string input with the path to a `.glb` or `.gltf` file
 - `output_format`: `ply`, `obj`, or `stl`
 - `output_dir`: optional output folder; empty writes next to the input file
 - `output_filename`: optional output file name without extension
