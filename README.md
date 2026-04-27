@@ -20,11 +20,18 @@ Restart ComfyUI.
 
 ## Node
 
-The node appears as:
+The nodes appear as:
 
 ```text
+mesh/conversion -> GLB File Picker
 mesh/conversion -> GLB Mesh Converter
 ```
+
+### GLB File Picker
+
+Use `Choose GLB/GLTF` to select a local `.glb` or `.gltf` file in the browser. The file is uploaded into ComfyUI's `input/glb` folder and the node returns the server-side `glb_path`.
+
+### GLB Mesh Converter
 
 Inputs:
 
@@ -37,3 +44,9 @@ Inputs:
 Output:
 
 - `output_path`: converted mesh file path
+
+Typical workflow:
+
+```text
+GLB File Picker.glb_path -> GLB Mesh Converter.glb_path
+```

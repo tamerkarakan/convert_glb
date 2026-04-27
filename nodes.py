@@ -1,12 +1,84 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+from time import time
 from typing import Any
 
 import trimesh
 
+try:
+    from aiohttp import web
+    import folder_paths
+    from server import PromptServer
+except Exception:
+    web = None
+    folder_paths = None
+    PromptServer = None
+
 
 SUPPORTED_FORMATS = ("ply", "obj", "stl")
+SUPPORTED_INPUT_FORMATS = {".glb", ".gltf"}
+
+
+def _safe_upload_name(filename: str) -> str:
+    stem = Path(filename).stem.replace(" ", "_")
+    suffix = Path(filename).suffix.lower()
+    safe_stem = "".join(char for char in stem if char.isalnum() or char in {"-", "_"}).strip("._")
+    return f"{safe_stem or 'mesh'}{suffix}"
+
+
+if PromptServer is not None and web is not None and folder_paths is not None:
+    @PromptServer.instance.routes.post("/convert_glb/upload")
+    async def upload_glb(request):
+        data = await request.post()
+        upload = data.get("file")
+
+        if upload is None or not getattr(upload, "filename", ""):
+            return web.json_response({"error": "No file was uploaded."}, status=400)
+
+        suffix = Path(upload.filename).suffix.lower()
+        if suffix not in SUPPORTED_INPUT_FORMATS:
+            return web.json_response({"error": "Only .glb and .gltf files are supported."}, status=400)
+
+        upload_dir = Path(folder_paths.get_input_directory()) / "glb"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        output_path = upload_dir / _safe_upload_name(upload.filename)
+        if output_path.exists():
+            output_path = output_path.with_stem(f"{output_path.stem}_{int(time())}")
+
+        with output_path.open("wb") as output_file:
+            shutil.copyfileobj(upload.file, output_file)
+
+        return web.json_response({"path": str(output_path.resolve())})
+
+
+class GLBFilePicker:
+    """Upload/select a GLB/GLTF file and return its server-side path."""
+
+    CATEGORY = "mesh/conversion"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("glb_path",)
+    FUNCTION = "pick"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict[str, Any]:
+        return {
+            "required": {
+                "glb_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": False,
+                        "tooltip": "Use the Choose GLB/GLTF button to upload a file.",
+                    },
+                ),
+            }
+        }
+
+    def pick(self, glb_path: str) -> tuple[str]:
+        return (str(GLBMeshConverter._resolve_input_path(glb_path)),)
 
 
 class GLBMeshConverter:
@@ -93,7 +165,7 @@ class GLBMeshConverter:
         path = path.resolve()
         if not path.exists():
             raise FileNotFoundError(f"Input file was not found: {path}")
-        if path.suffix.lower() not in {".glb", ".gltf"}:
+        if path.suffix.lower() not in SUPPORTED_INPUT_FORMATS:
             raise ValueError(f"Input must be a .glb or .gltf file: {path}")
         if not path.is_file():
             raise ValueError(f"Input path is not a file: {path}")
