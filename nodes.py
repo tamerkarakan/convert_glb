@@ -28,6 +28,12 @@ def _safe_upload_name(filename: str) -> str:
     return f"{safe_stem or 'mesh'}{suffix}"
 
 
+def _get_default_output_dir() -> Path:
+    if folder_paths is not None:
+        return Path(folder_paths.get_output_directory())
+    return Path.cwd()
+
+
 if PromptServer is not None and web is not None and folder_paths is not None:
     @PromptServer.instance.routes.post("/convert_glb/upload")
     async def upload_glb(request):
@@ -70,6 +76,7 @@ class GLBFilePicker:
                     "STRING",
                     {
                         "default": "",
+                        "forceInput": True,
                         "multiline": False,
                         "tooltip": "Use the Choose GLB/GLTF button to upload a file.",
                     },
@@ -108,14 +115,16 @@ class GLBMeshConverter:
                     "STRING",
                     {
                         "default": "",
+                        "forceInput": True,
                         "multiline": False,
-                        "tooltip": "Optional output folder. Empty means the input file folder.",
+                        "tooltip": "Optional output folder. Empty means ComfyUI's output folder.",
                     },
                 ),
                 "output_filename": (
                     "STRING",
                     {
                         "default": "",
+                        "forceInput": True,
                         "multiline": False,
                         "tooltip": "Optional file name without extension. Empty means input file stem.",
                     },
@@ -138,7 +147,7 @@ class GLBMeshConverter:
         if fmt not in SUPPORTED_FORMATS:
             raise ValueError(f"Unsupported output format '{output_format}'. Use one of: {', '.join(SUPPORTED_FORMATS)}")
 
-        destination_dir = Path(output_dir).expanduser() if output_dir.strip() else input_path.parent
+        destination_dir = Path(output_dir).expanduser() if output_dir.strip() else _get_default_output_dir()
         destination_dir.mkdir(parents=True, exist_ok=True)
 
         safe_stem = output_filename.strip() or input_path.stem

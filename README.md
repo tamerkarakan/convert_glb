@@ -31,14 +31,16 @@ mesh/conversion -> GLB Mesh Converter
 
 Use `Choose GLB/GLTF` to select a local `.glb` or `.gltf` file in the browser. The file is uploaded into ComfyUI's `input/glb` folder and the node returns the server-side `glb_path`.
 
+`glb_path` is also a connectable string input, so another node can provide the path directly.
+
 ### GLB Mesh Converter
 
 Inputs:
 
 - `glb_path`: connectable string input with the path to a `.glb` or `.gltf` file
 - `output_format`: `ply`, `obj`, or `stl`
-- `output_dir`: optional output folder; empty writes next to the input file
-- `output_filename`: optional output file name without extension
+- `output_dir`: connectable optional output folder; empty writes to ComfyUI's output folder
+- `output_filename`: connectable optional output file name without extension
 - `overwrite`: whether to replace an existing output file
 
 Output:
