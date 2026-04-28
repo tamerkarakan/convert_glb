@@ -34,6 +34,13 @@ def _get_default_output_dir() -> Path:
     return Path.cwd()
 
 
+def _choose_text_value(input_value: str = "", widget_value: str = "") -> str:
+    cleaned_input = str(input_value or "").strip()
+    if cleaned_input:
+        return cleaned_input
+    return str(widget_value or "").strip()
+
+
 if PromptServer is not None and web is not None and folder_paths is not None:
     @PromptServer.instance.routes.post("/convert_glb/upload")
     async def upload_glb(request):
@@ -76,16 +83,27 @@ class GLBFilePicker:
                     "STRING",
                     {
                         "default": "",
-                        "forceInput": True,
                         "multiline": False,
-                        "tooltip": "Use the Choose GLB/GLTF button to upload a file.",
+                        "tooltip": "Use the Choose GLB/GLTF button or type a .glb/.gltf path.",
                     },
                 ),
-            }
+            },
+            "optional": {
+                "glb_path_input": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "forceInput": True,
+                        "multiline": False,
+                        "tooltip": "Optional path input. If connected, this takes priority over glb_path.",
+                    },
+                ),
+            },
         }
 
-    def pick(self, glb_path: str) -> tuple[str]:
-        return (str(GLBMeshConverter._resolve_input_path(glb_path)),)
+    def pick(self, glb_path: str, glb_path_input: str = "") -> tuple[str]:
+        path_value = _choose_text_value(glb_path_input, glb_path)
+        return (str(GLBMeshConverter._resolve_input_path(path_value)),)
 
 
 class GLBMeshConverter:
@@ -111,6 +129,25 @@ class GLBMeshConverter:
                     },
                 ),
                 "output_format": (SUPPORTED_FORMATS, {"default": "ply"}),
+                "output_dir_text": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": False,
+                        "tooltip": "Optional output folder. Empty means ComfyUI's output folder.",
+                    },
+                ),
+                "output_filename_text": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": False,
+                        "tooltip": "Optional file name without extension. Empty means input file stem.",
+                    },
+                ),
+                "overwrite": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
                 "output_dir": (
                     "STRING",
                     {
@@ -129,14 +166,15 @@ class GLBMeshConverter:
                         "tooltip": "Optional file name without extension. Empty means input file stem.",
                     },
                 ),
-                "overwrite": ("BOOLEAN", {"default": True}),
-            }
+            },
         }
 
     def convert(
         self,
         glb_path: str,
         output_format: str,
+        output_dir_text: str = "",
+        output_filename_text: str = "",
         output_dir: str = "",
         output_filename: str = "",
         overwrite: bool = True,
@@ -147,10 +185,13 @@ class GLBMeshConverter:
         if fmt not in SUPPORTED_FORMATS:
             raise ValueError(f"Unsupported output format '{output_format}'. Use one of: {', '.join(SUPPORTED_FORMATS)}")
 
-        destination_dir = Path(output_dir).expanduser() if output_dir.strip() else _get_default_output_dir()
+        output_dir_value = _choose_text_value(output_dir, output_dir_text)
+        output_filename_value = _choose_text_value(output_filename, output_filename_text)
+
+        destination_dir = Path(output_dir_value).expanduser() if output_dir_value else _get_default_output_dir()
         destination_dir.mkdir(parents=True, exist_ok=True)
 
-        safe_stem = output_filename.strip() or input_path.stem
+        safe_stem = output_filename_value or input_path.stem
         output_path = destination_dir / f"{Path(safe_stem).stem}.{fmt}"
 
         if output_path.exists() and not overwrite:
