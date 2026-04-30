@@ -1,5 +1,13 @@
-import { app } from "../../scripts/app.js";
-import { api } from "../../scripts/api.js";
+async function getComfyApp() {
+    const comfyApi = globalThis.comfyAPI;
+    const app = comfyApi?.app?.app ?? comfyApi?.app;
+    if (app?.registerExtension) {
+        return app;
+    }
+
+    const legacy = await import("../../scripts/app.js");
+    return legacy.app;
+}
 
 function selectGlbFile() {
     return new Promise((resolve) => {
@@ -20,7 +28,12 @@ async function uploadGlbFile(file) {
     const body = new FormData();
     body.append("file", file);
 
-    const response = await api.fetchApi("/convert_glb/upload", {
+    const fetchApi =
+        globalThis.comfyAPI?.api?.api?.fetchApi ??
+        globalThis.comfyAPI?.api?.fetchApi ??
+        globalThis.fetch.bind(globalThis);
+
+    const response = await fetchApi("/convert_glb/upload", {
         method: "POST",
         body,
     });
@@ -32,42 +45,74 @@ async function uploadGlbFile(file) {
     return result.path;
 }
 
-app.registerExtension({
-    name: "convert_glb.file_picker",
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "GLBFilePicker") {
+function createPickerWidget(node, pathWidget) {
+    const container = document.createElement("div");
+    const button = document.createElement("button");
+
+    container.style.width = "100%";
+    container.style.boxSizing = "border-box";
+
+    button.type = "button";
+    button.textContent = "Choose GLB/GLTF";
+    button.style.width = "100%";
+    button.style.boxSizing = "border-box";
+    button.style.border = "1px solid #555";
+    button.style.borderRadius = "4px";
+    button.style.padding = "6px 8px";
+    button.style.background = "#2b2b2b";
+    button.style.color = "#ddd";
+    button.style.cursor = "pointer";
+
+    button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const file = await selectGlbFile();
+        if (!file) {
             return;
         }
 
-        const onNodeCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            onNodeCreated?.apply(this, arguments);
+        try {
+            button.disabled = true;
+            button.textContent = "Uploading...";
+            pathWidget.value = await uploadGlbFile(file);
+            pathWidget.callback?.(pathWidget.value);
+            node.graph?.setDirtyCanvas(true, true);
+        } catch (error) {
+            console.error("[convert_glb]", error);
+            alert(error.message ?? "GLB upload failed.");
+        } finally {
+            button.disabled = false;
+            button.textContent = "Choose GLB/GLTF";
+        }
+    });
 
-            const pathWidget = this.widgets?.find((widget) => widget.name === "glb_path");
-            if (!pathWidget) {
-                return;
-            }
+    container.appendChild(button);
 
-            this.addWidget(
-                "button",
-                "Choose GLB/GLTF",
-                null,
-                async () => {
-                    const file = await selectGlbFile();
-                    if (!file) {
-                        return;
-                    }
+    const widget = node.addDOMWidget("choose_glb", "GLB_FILE_PICKER", container, {
+        getValue() {
+            return "";
+        },
+        setValue() {},
+        getMinHeight() {
+            return 32;
+        },
+    });
+    widget.serialize = false;
+}
 
-                    try {
-                        pathWidget.value = await uploadGlbFile(file);
-                        this.graph?.setDirtyCanvas(true, true);
-                    } catch (error) {
-                        console.error("[convert_glb]", error);
-                        alert(error.message ?? "GLB upload failed.");
-                    }
-                },
-                { serialize: false }
-            );
-        };
+const app = await getComfyApp();
+
+app.registerExtension({
+    name: "convert_glb.file_picker",
+    nodeCreated(node) {
+        if (node.comfyClass !== "GLBFilePicker") {
+            return;
+        }
+
+        const pathWidget = node.widgets?.find((widget) => widget.name === "glb_path");
+        if (pathWidget) {
+            createPickerWidget(node, pathWidget);
+        }
     },
 });
