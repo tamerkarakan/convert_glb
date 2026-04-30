@@ -92,7 +92,7 @@ class GLBMeshConverter:
 
     CATEGORY = "mesh/conversion"
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("output_path",)
+    RETURN_NAMES = ("converted_model_path",)
     FUNCTION = "convert"
     OUTPUT_NODE = True
 
@@ -150,15 +150,15 @@ class GLBMeshConverter:
         destination_dir.mkdir(parents=True, exist_ok=True)
 
         safe_stem = output_filename_value or input_path.stem
-        output_path = destination_dir / f"{Path(safe_stem).stem}.{fmt}"
+        converted_path = (destination_dir / f"{Path(safe_stem).stem}.{fmt}").resolve()
 
-        if output_path.exists() and not overwrite:
-            raise FileExistsError(f"Output file already exists: {output_path}")
+        if converted_path.exists() and not overwrite:
+            raise FileExistsError(f"Output file already exists: {converted_path}")
 
         mesh = self._load_as_mesh(input_path)
-        mesh.export(output_path, file_type=fmt)
+        mesh.export(converted_path, file_type=fmt)
 
-        return (str(output_path),)
+        return (str(converted_path),)
 
     @staticmethod
     def _resolve_input_path(path_value: str) -> Path:

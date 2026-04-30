@@ -45,7 +45,7 @@ Inputs:
 
 Output:
 
-- `output_path`: converted mesh file path
+- `converted_model_path`: converted `.ply`, `.obj`, or `.stl` mesh file path
 
 Typical workflow:
 
