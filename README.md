@@ -38,7 +38,7 @@ The selected path is written into the same `glb_path` field that you can also ty
 Inputs:
 
 - `glb_path`: `.glb` or `.gltf` file path
-- `output_format`: `ply`, `obj`, or `stl`
+- `output_format`: `ply`, `obj`, or `stl`; defaults to `stl`
 - `output_dir`: optional output folder; empty writes to ComfyUI's output folder
 - `output_filename`: optional output file name without extension
 - `overwrite`: whether to replace an existing output file

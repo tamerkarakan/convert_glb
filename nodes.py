@@ -108,7 +108,7 @@ class GLBMeshConverter:
                         "tooltip": "Absolute or ComfyUI-relative path to a .glb or .gltf file.",
                     },
                 ),
-                "output_format": (SUPPORTED_FORMATS, {"default": "ply"}),
+                "output_format": (SUPPORTED_FORMATS, {"default": "stl"}),
                 "output_dir": (
                     "STRING",
                     {
