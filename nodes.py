@@ -16,6 +16,15 @@ except Exception:
     folder_paths = None
     PromptServer = None
 
+try:
+    from comfy_api.latest import ComfyExtension, io
+
+    COMFY_API_AVAILABLE = True
+except Exception:
+    ComfyExtension = None
+    io = None
+    COMFY_API_AVAILABLE = False
+
 
 SUPPORTED_FORMATS = ("ply", "obj", "stl")
 SUPPORTED_INPUT_FORMATS = {".glb", ".gltf"}
@@ -32,6 +41,76 @@ def _get_default_output_dir() -> Path:
     if folder_paths is not None:
         return Path(folder_paths.get_output_directory())
     return Path.cwd()
+
+
+def _resolve_input_path(path_value: str) -> Path:
+    cleaned = path_value.strip().strip('"')
+    if not cleaned:
+        raise ValueError("glb_path is required.")
+
+    path = Path(cleaned).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+
+    path = path.resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Input file was not found: {path}")
+    if path.suffix.lower() not in SUPPORTED_INPUT_FORMATS:
+        raise ValueError(f"Input must be a .glb or .gltf file: {path}")
+    if not path.is_file():
+        raise ValueError(f"Input path is not a file: {path}")
+
+    return path
+
+
+def _load_as_mesh(path: Path) -> trimesh.Trimesh:
+    loaded = trimesh.load(path, force="scene")
+
+    if isinstance(loaded, trimesh.Trimesh):
+        mesh = loaded
+    elif isinstance(loaded, trimesh.Scene):
+        dumped = loaded.dump(concatenate=True)
+        if not isinstance(dumped, trimesh.Trimesh):
+            raise ValueError(f"No mesh geometry found in: {path}")
+        mesh = dumped
+    else:
+        raise ValueError(f"Could not load mesh from: {path}")
+
+    if mesh.is_empty:
+        raise ValueError(f"Loaded mesh is empty: {path}")
+
+    return mesh
+
+
+def _convert_mesh(
+    glb_path: str,
+    output_format: str,
+    output_dir: str = "",
+    output_filename: str = "",
+    overwrite: bool = True,
+) -> str:
+    input_path = _resolve_input_path(glb_path)
+    fmt = output_format.lower().strip()
+
+    if fmt not in SUPPORTED_FORMATS:
+        raise ValueError(f"Unsupported output format '{output_format}'. Use one of: {', '.join(SUPPORTED_FORMATS)}")
+
+    output_dir_value = output_dir.strip()
+    output_filename_value = output_filename.strip()
+
+    destination_dir = Path(output_dir_value).expanduser() if output_dir_value else _get_default_output_dir()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_stem = output_filename_value or input_path.stem
+    converted_path = (destination_dir / f"{Path(safe_stem).stem}.{fmt}").resolve()
+
+    if converted_path.exists() and not overwrite:
+        raise FileExistsError(f"Output file already exists: {converted_path}")
+
+    mesh = _load_as_mesh(input_path)
+    mesh.export(converted_path, file_type=fmt)
+
+    return str(converted_path)
 
 
 if PromptServer is not None and web is not None and folder_paths is not None:
@@ -60,141 +139,172 @@ if PromptServer is not None and web is not None and folder_paths is not None:
         return web.json_response({"path": str(output_path.resolve())})
 
 
-class GLBFilePicker:
-    """Upload/select a GLB/GLTF file and return its server-side path."""
+if COMFY_API_AVAILABLE:
 
-    CATEGORY = "mesh/conversion"
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("glb_path",)
-    FUNCTION = "pick"
+    class GLBFilePicker(io.ComfyNode):
+        """Upload/select a GLB/GLTF file and return its server-side path."""
 
-    @classmethod
-    def INPUT_TYPES(cls) -> dict[str, Any]:
-        return {
-            "required": {
-                "glb_path": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "multiline": False,
-                        "tooltip": "Use the Choose GLB/GLTF button or type a .glb/.gltf path.",
-                    },
-                ),
-            },
-        }
+        @classmethod
+        def define_schema(cls) -> io.Schema:
+            return io.Schema(
+                node_id="GLBFilePicker",
+                display_name="GLB File Picker",
+                category="mesh/conversion",
+                description="Select or type a GLB/GLTF path and output the server-side path.",
+                inputs=[
+                    io.String.Input(
+                        "glb_path",
+                        default="",
+                        multiline=False,
+                        tooltip="Use the Choose GLB/GLTF button or type a .glb/.gltf path.",
+                    ),
+                ],
+                outputs=[
+                    io.String.Output(display_name="glb_path"),
+                ],
+            )
 
-    def pick(self, glb_path: str) -> tuple[str]:
-        return (str(GLBMeshConverter._resolve_input_path(glb_path)),)
+        @classmethod
+        def execute(cls, glb_path: str) -> io.NodeOutput:
+            return io.NodeOutput(str(_resolve_input_path(glb_path)))
 
 
-class GLBMeshConverter:
-    """Convert a GLB/GLTF mesh to PLY, OBJ, or STL."""
+    class GLBMeshConverter(io.ComfyNode):
+        """Convert a GLB/GLTF mesh to PLY, OBJ, or STL."""
 
-    CATEGORY = "mesh/conversion"
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("converted_model_path",)
-    FUNCTION = "convert"
-    OUTPUT_NODE = True
+        @classmethod
+        def define_schema(cls) -> io.Schema:
+            return io.Schema(
+                node_id="GLBMeshConverter",
+                display_name="GLB Mesh Converter",
+                category="mesh/conversion",
+                description="Convert a GLB/GLTF mesh to STL, OBJ, or PLY.",
+                is_output_node=True,
+                inputs=[
+                    io.String.Input(
+                        "glb_path",
+                        default="",
+                        multiline=False,
+                        tooltip="Absolute or ComfyUI-relative path to a .glb or .gltf file.",
+                    ),
+                    io.Combo.Input("output_format", options=list(SUPPORTED_FORMATS), default="stl"),
+                    io.String.Input(
+                        "output_dir",
+                        default="",
+                        multiline=False,
+                        tooltip="Optional output folder. Empty means ComfyUI's output folder.",
+                    ),
+                    io.String.Input(
+                        "output_filename",
+                        default="",
+                        multiline=False,
+                        tooltip="Optional file name without extension. Empty means input file stem.",
+                    ),
+                    io.Boolean.Input("overwrite", default=True),
+                ],
+                outputs=[
+                    io.String.Output(display_name="converted_model_path"),
+                ],
+            )
 
-    @classmethod
-    def INPUT_TYPES(cls) -> dict[str, Any]:
-        return {
-            "required": {
-                "glb_path": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "multiline": False,
-                        "tooltip": "Absolute or ComfyUI-relative path to a .glb or .gltf file.",
-                    },
-                ),
-                "output_format": (SUPPORTED_FORMATS, {"default": "stl"}),
-                "output_dir": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "multiline": False,
-                        "tooltip": "Optional output folder. Empty means ComfyUI's output folder.",
-                    },
-                ),
-                "output_filename": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "multiline": False,
-                        "tooltip": "Optional file name without extension. Empty means input file stem.",
-                    },
-                ),
-                "overwrite": ("BOOLEAN", {"default": True}),
-            },
-        }
+        @classmethod
+        def execute(
+            cls,
+            glb_path: str,
+            output_format: str,
+            output_dir: str = "",
+            output_filename: str = "",
+            overwrite: bool = True,
+        ) -> io.NodeOutput:
+            converted_path = _convert_mesh(glb_path, output_format, output_dir, output_filename, overwrite)
+            return io.NodeOutput(converted_path)
 
-    def convert(
-        self,
-        glb_path: str,
-        output_format: str,
-        output_dir: str = "",
-        output_filename: str = "",
-        overwrite: bool = True,
-    ) -> tuple[str]:
-        input_path = self._resolve_input_path(glb_path)
-        fmt = output_format.lower().strip()
 
-        if fmt not in SUPPORTED_FORMATS:
-            raise ValueError(f"Unsupported output format '{output_format}'. Use one of: {', '.join(SUPPORTED_FORMATS)}")
+    class ConvertGLBExtension(ComfyExtension):
+        async def get_node_list(self) -> list[type[io.ComfyNode]]:
+            return [GLBFilePicker, GLBMeshConverter]
 
-        output_dir_value = output_dir.strip()
-        output_filename_value = output_filename.strip()
 
-        destination_dir = Path(output_dir_value).expanduser() if output_dir_value else _get_default_output_dir()
-        destination_dir.mkdir(parents=True, exist_ok=True)
+    async def comfy_entrypoint() -> ConvertGLBExtension:
+        return ConvertGLBExtension()
 
-        safe_stem = output_filename_value or input_path.stem
-        converted_path = (destination_dir / f"{Path(safe_stem).stem}.{fmt}").resolve()
+else:
 
-        if converted_path.exists() and not overwrite:
-            raise FileExistsError(f"Output file already exists: {converted_path}")
+    class GLBFilePicker:
+        """Legacy V1 fallback for older ComfyUI versions."""
 
-        mesh = self._load_as_mesh(input_path)
-        mesh.export(converted_path, file_type=fmt)
+        CATEGORY = "mesh/conversion"
+        RETURN_TYPES = ("STRING",)
+        RETURN_NAMES = ("glb_path",)
+        FUNCTION = "pick"
 
-        return (str(converted_path),)
+        @classmethod
+        def INPUT_TYPES(cls) -> dict[str, Any]:
+            return {
+                "required": {
+                    "glb_path": (
+                        "STRING",
+                        {
+                            "default": "",
+                            "multiline": False,
+                            "tooltip": "Use the Choose GLB/GLTF button or type a .glb/.gltf path.",
+                        },
+                    ),
+                },
+            }
 
-    @staticmethod
-    def _resolve_input_path(path_value: str) -> Path:
-        cleaned = path_value.strip().strip('"')
-        if not cleaned:
-            raise ValueError("glb_path is required.")
+        def pick(self, glb_path: str) -> tuple[str]:
+            return (str(_resolve_input_path(glb_path)),)
 
-        path = Path(cleaned).expanduser()
-        if not path.is_absolute():
-            path = Path.cwd() / path
 
-        path = path.resolve()
-        if not path.exists():
-            raise FileNotFoundError(f"Input file was not found: {path}")
-        if path.suffix.lower() not in SUPPORTED_INPUT_FORMATS:
-            raise ValueError(f"Input must be a .glb or .gltf file: {path}")
-        if not path.is_file():
-            raise ValueError(f"Input path is not a file: {path}")
+    class GLBMeshConverter:
+        """Legacy V1 fallback for older ComfyUI versions."""
 
-        return path
+        CATEGORY = "mesh/conversion"
+        RETURN_TYPES = ("STRING",)
+        RETURN_NAMES = ("converted_model_path",)
+        FUNCTION = "convert"
+        OUTPUT_NODE = True
 
-    @staticmethod
-    def _load_as_mesh(path: Path) -> trimesh.Trimesh:
-        loaded = trimesh.load(path, force="scene")
+        @classmethod
+        def INPUT_TYPES(cls) -> dict[str, Any]:
+            return {
+                "required": {
+                    "glb_path": (
+                        "STRING",
+                        {
+                            "default": "",
+                            "multiline": False,
+                            "tooltip": "Absolute or ComfyUI-relative path to a .glb or .gltf file.",
+                        },
+                    ),
+                    "output_format": (SUPPORTED_FORMATS, {"default": "stl"}),
+                    "output_dir": (
+                        "STRING",
+                        {
+                            "default": "",
+                            "multiline": False,
+                            "tooltip": "Optional output folder. Empty means ComfyUI's output folder.",
+                        },
+                    ),
+                    "output_filename": (
+                        "STRING",
+                        {
+                            "default": "",
+                            "multiline": False,
+                            "tooltip": "Optional file name without extension. Empty means input file stem.",
+                        },
+                    ),
+                    "overwrite": ("BOOLEAN", {"default": True}),
+                },
+            }
 
-        if isinstance(loaded, trimesh.Trimesh):
-            mesh = loaded
-        elif isinstance(loaded, trimesh.Scene):
-            dumped = loaded.dump(concatenate=True)
-            if not isinstance(dumped, trimesh.Trimesh):
-                raise ValueError(f"No mesh geometry found in: {path}")
-            mesh = dumped
-        else:
-            raise ValueError(f"Could not load mesh from: {path}")
-
-        if mesh.is_empty:
-            raise ValueError(f"Loaded mesh is empty: {path}")
-
-        return mesh
+        def convert(
+            self,
+            glb_path: str,
+            output_format: str,
+            output_dir: str = "",
+            output_filename: str = "",
+            overwrite: bool = True,
+        ) -> tuple[str]:
+            return (_convert_mesh(glb_path, output_format, output_dir, output_filename, overwrite),)

@@ -2,6 +2,8 @@
 
 ComfyUI custom node for converting `.glb` or `.gltf` files to `.ply`, `.obj`, or `.stl` using `trimesh`.
 
+The node uses ComfyUI's modern V3 custom node API (`comfy_api.latest`) when available, with a V1 fallback for older ComfyUI installs.
+
 ## Install
 
 Place this folder under:
